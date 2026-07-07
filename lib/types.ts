@@ -20,4 +20,18 @@ export type PO = {
 };
 
 export type ExtractResponse = { po: PO } | { error: string };
-export type ClauseResponse = { summary: string | null } | { error: string };
+
+// One row of the quality-clause read-out.
+export type ClauseRow = {
+  code: string; // clause code or short name, e.g. "Q1" or "DFARS 252.225-7009"
+  requirement: string; // one concise sentence: what it requires
+  action: string; // short action type, e.g. "Cert of Conformance", "Source inspection", "None"
+  actionRequired: boolean; // true if the supplier/rep must act on it
+};
+
+export type ClauseSummary = {
+  clauses: ClauseRow[];
+  note: string | null; // e.g. whether the referenced spec URL was read or unreachable
+};
+
+export type ClauseResponse = ClauseSummary | { error: string };

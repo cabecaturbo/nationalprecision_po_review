@@ -1,7 +1,7 @@
 "use client";
 
 import React, { useState, useCallback, useRef } from "react";
-import type { PO } from "@/lib/types";
+import type { PO, ClauseSummary } from "@/lib/types";
 
 // ── National Precision Bearing — PO Review Desk ────────────────────
 // Enterprise contract-review tool for inbound bearing POs.
@@ -94,10 +94,14 @@ async function extractPO(file: File): Promise<PO> {
   return data.po as PO;
 }
 
-async function summarizeClauses(po: PO): Promise<string | null> {
+async function summarizeClauses(po: PO): Promise<ClauseSummary | null> {
   const clauses = po.quality_clauses || [];
   const url = po.quality_url || "";
   if (!clauses.length && !url) return null;
+  const fallback: ClauseSummary = {
+    clauses: [],
+    note: "Clause detail unavailable — review the referenced specification manually.",
+  };
   let res: Response;
   try {
     res = await fetch("/api/clauses", {
@@ -106,12 +110,14 @@ async function summarizeClauses(po: PO): Promise<string | null> {
       body: JSON.stringify({ clauses, url }),
     });
   } catch {
-    return "Clause detail unavailable. Review the referenced specification manually.";
+    return fallback;
   }
-  const data = await res.json().catch(() => ({}));
-  if (!res.ok)
-    return "Clause detail unavailable. Review the referenced specification manually.";
-  return data.summary ?? null;
+  const data = await res.json().catch(() => null);
+  if (!res.ok || !data) return fallback;
+  return {
+    clauses: Array.isArray(data.clauses) ? data.clauses : [],
+    note: typeof data.note === "string" ? data.note : null,
+  };
 }
 
 const fmt = (v: unknown): string =>
@@ -230,6 +236,54 @@ function Spinner({ light, size = 15 }: { light?: boolean; size?: number }) {
   );
 }
 
+function ActionTag({ text, required }: { text: string; required: boolean }) {
+  const bg = required ? "#eaf1f8" : "#f0f2f5";
+  const fg = required ? NPB_BLUE : SLATE;
+  const bd = required ? "#c5d9ec" : "#dde1e7";
+  return (
+    <span style={{ fontFamily: DISPLAY, background: bg, color: fg, border: `1px solid ${bd}`, fontSize: 9.5, fontWeight: 600, letterSpacing: ".03em", padding: "3px 8px", borderRadius: 3, textTransform: "uppercase", whiteSpace: "nowrap" }}>
+      {text}
+    </span>
+  );
+}
+
+const CLAUSE_COLS = "150px 1fr 132px";
+
+// Renders the quality-clause read-out as a scannable table (or just a note if
+// there was nothing structured to show).
+function ClauseSummaryView({ summary }: { summary: ClauseSummary }) {
+  if (!summary.clauses.length) {
+    return (
+      <div style={{ background: "#fff", border: `1px solid ${LINE}`, borderLeft: `3px solid ${NPB_BLUE}`, borderRadius: 6, padding: "14px 18px", fontSize: 13, color: "#2c3644", lineHeight: 1.6 }}>
+        {summary.note || "No clause detail available."}
+      </div>
+    );
+  }
+  return (
+    <div>
+      <div style={{ background: "#fff", border: `1px solid ${LINE}`, borderRadius: 8, overflow: "hidden" }}>
+        <div style={{ fontFamily: DISPLAY, display: "grid", gridTemplateColumns: CLAUSE_COLS, gap: 12, padding: "9px 16px", background: "#f7f9fb", borderBottom: `1px solid ${LINE}`, fontSize: 10, fontWeight: 600, letterSpacing: ".08em", color: SLATE, textTransform: "uppercase" }}>
+          <div>Clause</div><div>Requirement</div><div>Action</div>
+        </div>
+        {summary.clauses.map((c, i) => (
+          <div key={i} style={{ display: "grid", gridTemplateColumns: CLAUSE_COLS, gap: 12, padding: "12px 16px", alignItems: "start", borderTop: i ? `1px solid ${LINE}` : "none" }}>
+            <div style={{ fontFamily: MONO, fontSize: 12, color: INK, fontWeight: 500, lineHeight: 1.45 }}>{c.code}</div>
+            <div style={{ fontSize: 13, color: "#2c3644", lineHeight: 1.5 }}>{c.requirement}</div>
+            <div>
+              {c.action && c.action.toLowerCase() !== "none"
+                ? <ActionTag text={c.action} required={c.actionRequired} />
+                : <span style={{ fontSize: 12, color: SLATE }}>—</span>}
+            </div>
+          </div>
+        ))}
+      </div>
+      {summary.note && (
+        <div style={{ marginTop: 10, fontSize: 12, color: SLATE, lineHeight: 1.5 }}>{summary.note}</div>
+      )}
+    </div>
+  );
+}
+
 export default function Page() {
   const [mode, setMode] = useState<"compare" | "review">("compare");
   const [oldFile, setOldFile] = useState<File | null>(null);
@@ -240,7 +294,7 @@ export default function Page() {
   const [oldPO, setOldPO] = useState<PO | null>(null);
   const [newPO, setNewPO] = useState<PO | null>(null);
   const [reviewPO, setReviewPO] = useState<PO | null>(null);
-  const [clauseSummary, setClauseSummary] = useState<string | null>(null);
+  const [clauseSummary, setClauseSummary] = useState<ClauseSummary | null>(null);
   const [error, setError] = useState("");
 
   const runCompare = useCallback(async () => {
@@ -429,9 +483,7 @@ export default function Page() {
                 </span>
               </div>
             ) : clauseSummary ? (
-              <div style={{ background: "#fff", border: `1px solid ${LINE}`, borderLeft: `3px solid ${NPB_BLUE}`, borderRadius: 6, padding: "15px 18px", fontSize: 13, lineHeight: 1.65, color: "#2c3644", whiteSpace: "pre-wrap" }}>
-                {clauseSummary}
-              </div>
+              <ClauseSummaryView summary={clauseSummary} />
             ) : null}
           </div>
         )}
